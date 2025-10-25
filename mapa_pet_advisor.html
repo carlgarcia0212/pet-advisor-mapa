@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mapa Pet Advisor</title>
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    #map { width: 100%; height: 100vh; }
+    .info-window {
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .info-window h3 {
+      margin: 0;
+      font-size: 16px;
+      color: #333;
+    }
+    .info-window .tipo {
+      font-weight: bold;
+      color: #d60000;
+      text-transform: capitalize;
+    }
+    .info-window img {
+      width: 100%;
+      max-width: 200px;
+      margin-top: 8px;
+      border-radius: 6px;
+    }
+  </style>
+
+  <!-- Google Maps con Places API -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBoIy_3euyxHLlp55h3XHTpH3RfJ-2vfw0&libraries=places"></script>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script>
+    const JSON_URL = "https://carlgarcia0212.github.io/pet-advisor/pet_advisor.json";
+    const ADALO_API_URL = "https://api.adalo.com/v0/apps/1937146d-cd3f-4aa7-92c0-b55c61384929/collections/t_1hqkb5p863rli42e1som116cz";
+    const ADALO_BEARER = "9ei5zqpvufnnvluqq3jund7o8";
+
+    let selectedMarker = null;
+
+    // 🎨 Colores por tipo
+    function getColorByType(tipo) {
+      tipo = tipo ? tipo.toLowerCase() : "";
+      if (tipo.includes("veterinaria") || tipo.includes("veterinario")) return "#007bff"; // azul
+      if (tipo.includes("pelu")) return "#e91e63"; // rosado
+      if (tipo.includes("hotel")) return "#4caf50"; // verde
+      if (tipo.includes("guarderia")) return "#ff9800"; // naranja
+      if (tipo.includes("adiestramiento") || tipo.includes("entrenamiento")) return "#9c27b0"; // morado
+      return "#d60000"; // rojo por defecto
+    }
+
+    async function initMap() {
+      const map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: -33.45, lng: -70.65 },
+        zoom: 12
+      });
+
+      // Cargar JSON
+      let lugares = [];
+      try {
+        const resp = await fetch(JSON_URL, { cache: 'no-store' });
+        if (!resp.ok) throw new Error("No se pudo cargar el JSON");
+        lugares = await resp.json();
+      } catch (e) {
+        console.error("Error cargando JSON:", e);
+        return;
+      }
+
+      const service = new google.maps.places.PlacesService(map);
+      const infoWindow = new google.maps.InfoWindow();
+
+      lugares.forEach(lugar => {
+        const placeId = lugar.place_id;
+        if (!placeId) return;
+
+        service.getDetails({
+          placeId: placeId,
+          fields: ['name', 'geometry']
+        }, (place, status) => {
+          if (status !== google.maps.places.PlacesServiceStatus.OK || !place.geometry) {
+            console.warn("No se pudo obtener info de:", placeId, status);
+            return;
+          }
+
+          const color = getColorByType(lugar.tipo);
+
+          const marker = new google.maps.Marker({
+            position: place.geometry.location,
+            map,
+            title: lugar.nombre_negocio,
+            icon: {
+              path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+              scale: 5,
+              fillColor: color,
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 2
+            }
+          });
+
+          marker.addListener('click', () => {
+            // Restaurar color del marcador anterior
+            if (selectedMarker && selectedMarker !== marker) {
+              const prevColor = getColorByType(selectedMarker.tipoLugar || "");
+              selectedMarker.setIcon({
+                path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+                scale: 5,
+                fillColor: prevColor,
+                fillOpacity: 1,
+                strokeColor: '#ffffff',
+                strokeWeight: 2
+              });
+            }
+
+            // Marcar seleccionado (café oscuro)
+            marker.setIcon({
+              path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+              scale: 5,
+              fillColor: '#4b2e05', // café oscuro
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 2
+            });
+
+            selectedMarker = marker;
+            selectedMarker.tipoLugar = lugar.tipo;
+
+            const content = `
+              <div class="info-window">
+                <h3>${lugar.nombre_negocio}</h3>
+                <p class="tipo">${lugar.tipo || 'Sin tipo definido'}</p>
+                <p>${lugar.ciudad}</p>
+                ${lugar.imagen_url ? `<img src="${lugar.imagen_url}" alt="${lugar.nombre_negocio}"/>` : ""}
+              </div>
+            `;
+            infoWindow.setContent(content);
+            infoWindow.open(map, marker);
+
+            guardarSeleccion(lugar);
+          });
+        });
+      });
+    }
+
+    async function guardarSeleccion(lugar) {
+      const payload = {
+        place_id: lugar.place_id || "",
+        nombre: lugar.nombre_negocio || "",
+        ciudad: lugar.ciudad || "",
+        imagen_url: lugar.imagen_url || "",
+        tipo: lugar.tipo || ""
+      };
+
+      try {
+        await fetch(ADALO_API_URL, {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + ADALO_BEARER,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+        console.log("✅ Guardado en Adalo:", payload.nombre);
+      } catch (err) {
+        console.warn("Error al guardar en Adalo", err);
+      }
+    }
+
+    window.onload = initMap;
+  </script>
+</body>
+</html>
