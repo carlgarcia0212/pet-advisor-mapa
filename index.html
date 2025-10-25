@@ -1,34 +1,151 @@
-<script>
-  const JSON_URL = "https://carlgarcia0212.github.io/pet-advisor-mapa/pet_advisor.json";
-  const ADALO_API_URL = "https://api.adalo.com/v0/apps/1937146d-cd3f-4aa7-92c0-b55c61384929/collections/t_1hqkb5p863rli42e1som116cz";
-  const ADALO_BEARER = "9ei5zqpvufnnvluqq3jund7o8";
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mapa Pet Advisor</title>
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    #map { width: 100%; height: 100vh; }
+    #locateBtn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 5;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      font-family: Arial, sans-serif;
+    }
+  </style>
 
-  let selectedMarker = null;
-  let markers = [];
+  <!-- Tu nueva API de Google -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCk1FlBaukuukLeUpmwgXmAFzAdNe8xF3U&libraries=places"></script>
+</head>
+<body>
+  <div id="map"></div>
+  <button id="locateBtn">📍 Usar mi ubicación</button>
 
-  function getColorByType(tipo) {
-    tipo = tipo ? tipo.toLowerCase() : "";
-    if (tipo.includes("veterinaria")) return "#007bff";
-    if (tipo.includes("pelu")) return "#e91e63";
-    if (tipo.includes("hotel")) return "#4caf50";
-    if (tipo.includes("guarderia")) return "#ff9800";
-    if (tipo.includes("adiestramiento")) return "#9c27b0";
-    return "#d60000";
-  }
+  <script>
+    const JSON_URL = "https://carlgarcia0212.github.io/pet-advisor-mapa/pet_advisor.json";
+    const ADALO_API_URL = "https://api.adalo.com/v0/apps/1937146d-cd3f-4aa7-92c0-b55c61384929/collections/t_1hqkb5p863rli42e1som116cz";
+    const ADALO_BEARER = "9ei5zqpvufnnvluqq3jund7o8";
 
-  async function initMap() {
-    const map = new google.maps.Map(document.getElementById("map"), {
-      center: { lat: 40.4168, lng: -3.7038 },
-      zoom: 6,
-    });
+    let map, userMarker = null, selectedMarker = null, markers = [];
 
-    // 🟢 Mostrar ubicación actual si el usuario da permiso
-    if ("geolocation" in navigator) {
+    // 🎨 Colores según tipo
+    function getColorByType(tipo) {
+      tipo = tipo ? tipo.toLowerCase() : "";
+      if (tipo.includes("veterinaria")) return "#007bff";
+      if (tipo.includes("pelu")) return "#e91e63";
+      if (tipo.includes("hotel")) return "#4caf50";
+      if (tipo.includes("guarderia")) return "#ff9800";
+      if (tipo.includes("adiestramiento")) return "#9c27b0";
+      return "#d60000";
+    }
+
+    async function initMap() {
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 40.4168, lng: -3.7038 }, // España por defecto
+        zoom: 6
+      });
+
+      document.getElementById("locateBtn").addEventListener("click", getUserLocation);
+
+      const lugares = await loadJSON(JSON_URL);
+      if (!lugares) return;
+
+      const service = new google.maps.places.PlacesService(map);
+      const bounds = new google.maps.LatLngBounds();
+
+      lugares.forEach(lugar => {
+        if (!lugar.place_id) return;
+
+        service.getDetails({ placeId: lugar.place_id, fields: ["name", "geometry"] },
+          (place, status) => {
+            if (status !== google.maps.places.PlacesServiceStatus.OK || !place.geometry) {
+              console.warn("⚠️ No se pudo obtener detalles de:", lugar.place_id, status);
+              return;
+            }
+
+            const marker = new google.maps.Marker({
+              position: place.geometry.location,
+              map,
+              title: lugar.nombre_negocio,
+              icon: {
+                path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+                scale: 5,
+                fillColor: getColorByType(lugar.tipo),
+                fillOpacity: 1,
+                strokeColor: "#fff",
+                strokeWeight: 2
+              }
+            });
+
+            marker.addListener("click", () => {
+              if (selectedMarker && selectedMarker !== marker) {
+                const prevColor = getColorByType(selectedMarker.tipoLugar || "");
+                selectedMarker.setIcon({
+                  path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+                  scale: 5,
+                  fillColor: prevColor,
+                  fillOpacity: 1,
+                  strokeColor: "#fff",
+                  strokeWeight: 2
+                });
+              }
+
+              marker.setIcon({
+                path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+                scale: 5,
+                fillColor: "#4b2e05", // café oscuro
+                fillOpacity: 1,
+                strokeColor: "#fff",
+                strokeWeight: 2
+              });
+
+              selectedMarker = marker;
+              selectedMarker.tipoLugar = lugar.tipo;
+              guardarSeleccion(lugar);
+            });
+
+            markers.push(marker);
+            bounds.extend(place.geometry.location);
+            map.fitBounds(bounds);
+          });
+      });
+    }
+
+    async function loadJSON(url) {
+      try {
+        const resp = await fetch(url, { cache: "no-store" });
+        if (!resp.ok) throw new Error("No se pudo cargar el JSON");
+        const data = await resp.json();
+        console.log(`📦 Cargados ${data.length} registros`);
+        return data;
+      } catch (e) {
+        alert("Error cargando JSON: " + e.message);
+        return null;
+      }
+    }
+
+    // 📍 Mostrar ubicación actual al hacer clic en el botón
+    function getUserLocation() {
+      if (!("geolocation" in navigator)) {
+        alert("Tu navegador no soporta geolocalización.");
+        return;
+      }
+
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const userPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          new google.maps.Marker({
-            position: userPos,
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          if (userMarker) userMarker.setMap(null);
+
+          userMarker = new google.maps.Marker({
+            position: coords,
             map,
             icon: {
               path: google.maps.SymbolPath.CIRCLE,
@@ -36,119 +153,49 @@
               fillColor: "#1a73e8",
               fillOpacity: 1,
               strokeColor: "#fff",
-              strokeWeight: 2,
+              strokeWeight: 2
             },
-            title: "Tu ubicación actual",
+            title: "Tu ubicación actual"
           });
-          map.setCenter(userPos);
-          map.setZoom(13);
+
+          map.setCenter(coords);
+          map.setZoom(14);
+          console.log("📍 Ubicación del usuario:", coords);
         },
-        (err) => console.warn("⚠️ No se pudo obtener ubicación:", err.message),
-        { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
-      );
-    } else {
-      console.warn("Geolocalización no disponible en este navegador.");
-    }
-
-    // 📦 Cargar JSON
-    let lugares = [];
-    try {
-      const resp = await fetch(JSON_URL, { cache: "no-store" });
-      if (!resp.ok) throw new Error("No se pudo cargar el JSON");
-      lugares = await resp.json();
-      console.log(`📦 Cargados ${lugares.length} registros del JSON`);
-    } catch (e) {
-      alert("Error cargando el JSON: " + e.message);
-      return;
-    }
-
-    const service = new google.maps.places.PlacesService(map);
-    const bounds = new google.maps.LatLngBounds();
-
-    lugares.forEach((lugar) => {
-      if (!lugar.place_id) return;
-      service.getDetails(
-        { placeId: lugar.place_id, fields: ["name", "geometry"] },
-        (place, status) => {
-          if (status !== google.maps.places.PlacesServiceStatus.OK || !place.geometry) {
-            console.warn("⚠️ No se pudo obtener detalles de:", lugar.place_id, status);
-            return;
-          }
-
-          const color = getColorByType(lugar.tipo);
-          const marker = new google.maps.Marker({
-            position: place.geometry.location,
-            map,
-            title: lugar.nombre_negocio,
-            icon: {
-              path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
-              scale: 5,
-              fillColor: color,
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            },
-          });
-
-          marker.addListener("click", () => {
-            if (selectedMarker && selectedMarker !== marker) {
-              const prevColor = getColorByType(selectedMarker.tipoLugar || "");
-              selectedMarker.setIcon({
-                path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
-                scale: 5,
-                fillColor: prevColor,
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 2,
-              });
-            }
-
-            marker.setIcon({
-              path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
-              scale: 5,
-              fillColor: "#4b2e05",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            });
-
-            selectedMarker = marker;
-            selectedMarker.tipoLugar = lugar.tipo;
-            guardarSeleccion(lugar);
-          });
-
-          markers.push(marker);
-          bounds.extend(place.geometry.location);
-          map.fitBounds(bounds);
-        }
-      );
-    });
-  }
-
-  async function guardarSeleccion(lugar) {
-    const payload = {
-      place_id: lugar.place_id || "",
-      nombre: lugar.nombre_negocio || "",
-      ciudad: lugar.ciudad || "",
-      imagen_url: lugar.imagen_url || "",
-      tipo: lugar.tipo || "",
-    };
-
-    try {
-      await fetch(ADALO_API_URL, {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + ADALO_BEARER,
-          "Content-Type": "application/json",
+        (err) => {
+          console.warn("No se pudo obtener ubicación:", err.message);
+          if (err.code === 1) alert("Debes permitir el acceso a la ubicación en el candado 🔒 del navegador.");
         },
-        body: JSON.stringify(payload),
-      });
-      console.log("✅ Guardado en Adalo:", payload.nombre);
-    } catch (err) {
-      console.warn("Error al guardar en Adalo", err);
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 7000 }
+      );
     }
-  }
 
-  window.onload = initMap;
-</script>
+    async function guardarSeleccion(lugar) {
+      const payload = {
+        place_id: lugar.place_id || "",
+        nombre: lugar.nombre_negocio || "",
+        ciudad: lugar.ciudad || "",
+        imagen_url: lugar.imagen_url || "",
+        tipo: lugar.tipo || ""
+      };
+
+      try {
+        await fetch(ADALO_API_URL, {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + ADALO_BEARER,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+        console.log("✅ Guardado en Adalo:", payload.nombre);
+      } catch (err) {
+        console.warn("Error al guardar en Adalo", err);
+      }
+    }
+
+    window.onload = initMap;
+  </script>
+</body>
+</html>
 
